@@ -925,7 +925,7 @@
 
     // ===== 數據結構 =====
     const defaultRow = () => ({ condition: '', param: '', note: '' });
-    const defaultExit = () => ({ condition: '', action: '', next: '' });
+    const defaultExit = () => ({ type: '', condition: '', action: '', next: '' });
     const defaultStage = () => ({ trigger: '', direction: '', defaultSL: '', defaultTP: '', trailingSL: '', trailingTP: '', afterClose: '' });
 
     const createStrategy = () => ({
@@ -933,7 +933,12 @@
       long: {
         stage1: {
           entry: [defaultRow(), defaultRow(), defaultRow(), defaultRow()],
-          exit: { defaultSL: defaultExit(), trailingSL: defaultExit(), defaultTP: defaultExit(), trailingTP: defaultExit() }
+          exit: [
+            { type: '默認止損', condition: '', action: '', next: '' },
+            { type: '移動止損', condition: '', action: '', next: '' },
+            { type: '默認止盈', condition: '', action: '', next: '' },
+            { type: '移動止盈', condition: '', action: '', next: '' }
+          ]
         },
         stage2: defaultStage(),
         stage3: defaultStage(),
@@ -942,7 +947,12 @@
       short: {
         stage1: {
           entry: [defaultRow(), defaultRow(), defaultRow(), defaultRow()],
-          exit: { defaultSL: defaultExit(), trailingSL: defaultExit(), defaultTP: defaultExit(), trailingTP: defaultExit() }
+          exit: [
+            { type: '默認止損', condition: '', action: '', next: '' },
+            { type: '移動止損', condition: '', action: '', next: '' },
+            { type: '默認止盈', condition: '', action: '', next: '' },
+            { type: '移動止盈', condition: '', action: '', next: '' }
+          ]
         },
         stage2: defaultStage(),
         stage3: defaultStage(),
@@ -955,13 +965,6 @@
     let savedList = [];
     let longStage = 1, shortStage = 1;
     let pendingLoadIndex = -1;
-
-    const exitTypes = [
-      { key: 'defaultSL', label: '默認止損' },
-      { key: 'trailingSL', label: '移動止損' },
-      { key: 'defaultTP', label: '默認止盈' },
-      { key: 'trailingTP', label: '移動止盈' }
-    ];
 
     const stageFields = [
       { key: 'trigger', label: '觸發條件' },
@@ -1027,13 +1030,12 @@
         note: applyConversions(row.note)
       }));
       
-      exitTypes.forEach(({ key }) => {
-        strategy.short.stage1.exit[key] = {
-          condition: applyConversions(strategy.long.stage1.exit[key].condition),
-          action: applyConversions(strategy.long.stage1.exit[key].action),
-          next: applyConversions(strategy.long.stage1.exit[key].next)
-        };
-      });
+      strategy.short.stage1.exit = strategy.long.stage1.exit.map(row => ({
+        type: applyConversions(row.type),
+        condition: applyConversions(row.condition),
+        action: applyConversions(row.action),
+        next: applyConversions(row.next)
+      }));
       
       [2, 3, 4].forEach(n => {
         stageFields.forEach(({ key }) => {
@@ -1098,19 +1100,24 @@
           <div class="section-title long">平倉條件</div>
           <div class="data-table">
             <div class="table-header">
-              <div class="col-label">類型</div>
+              <div class="col-num">#</div>
+              <div class="col-flex">類型</div>
               <div class="col-flex">條件</div>
               <div class="col-flex">動作</div>
               <div class="col-flex">後續</div>
+              <div class="col-action"></div>
             </div>
-            ${exitTypes.map(({ key, label }) => `
+            ${strategy.long.stage1.exit.map((row, i) => `
               <div class="table-row">
-                <div class="col-label">${label}</div>
-                <div class="col-flex"><input class="input-field" placeholder="條件" value="${esc(strategy.long.stage1.exit[key].condition)}" onchange="updateLongExit('${key}','condition',this.value)" maxlength="200"></div>
-                <div class="col-flex"><input class="input-field" placeholder="動作" value="${esc(strategy.long.stage1.exit[key].action)}" onchange="updateLongExit('${key}','action',this.value)" maxlength="200"></div>
-                <div class="col-flex"><input class="input-field" placeholder="後續" value="${esc(strategy.long.stage1.exit[key].next)}" onchange="updateLongExit('${key}','next',this.value)" maxlength="200"></div>
+                <div class="col-num">${i + 1}</div>
+                <div class="col-flex"><input class="input-field" placeholder="類型" value="${esc(row.type)}" onchange="updateLongExit(${i},'type',this.value)" maxlength="50"></div>
+                <div class="col-flex"><input class="input-field" placeholder="條件" value="${esc(row.condition)}" onchange="updateLongExit(${i},'condition',this.value)" maxlength="200"></div>
+                <div class="col-flex"><input class="input-field" placeholder="動作" value="${esc(row.action)}" onchange="updateLongExit(${i},'action',this.value)" maxlength="200"></div>
+                <div class="col-flex"><input class="input-field" placeholder="後續" value="${esc(row.next)}" onchange="updateLongExit(${i},'next',this.value)" maxlength="200"></div>
+                <div class="col-action"><button class="icon-btn remove" onclick="removeLongExit(${i})">✕</button></div>
               </div>
             `).join('')}
+            <div class="add-row"><button class="icon-btn add" onclick="addLongExit()">+ 新增</button></div>
           </div>
         `;
       } else {
@@ -1164,19 +1171,24 @@
           <div class="section-title short">平倉條件</div>
           <div class="data-table">
             <div class="table-header">
-              <div class="col-label">類型</div>
+              <div class="col-num">#</div>
+              <div class="col-flex">類型</div>
               <div class="col-flex">條件</div>
               <div class="col-flex">動作</div>
               <div class="col-flex">後續</div>
+              <div class="col-action"></div>
             </div>
-            ${exitTypes.map(({ key, label }) => `
+            ${strategy.short.stage1.exit.map((row, i) => `
               <div class="table-row">
-                <div class="col-label">${label}</div>
-                <div class="col-flex"><input class="input-field ${cv}" placeholder="條件" value="${esc(strategy.short.stage1.exit[key].condition)}" onchange="updateShortExit('${key}','condition',this.value)" maxlength="200"></div>
-                <div class="col-flex"><input class="input-field ${cv}" placeholder="動作" value="${esc(strategy.short.stage1.exit[key].action)}" onchange="updateShortExit('${key}','action',this.value)" maxlength="200"></div>
-                <div class="col-flex"><input class="input-field ${cv}" placeholder="後續" value="${esc(strategy.short.stage1.exit[key].next)}" onchange="updateShortExit('${key}','next',this.value)" maxlength="200"></div>
+                <div class="col-num">${i + 1}</div>
+                <div class="col-flex"><input class="input-field ${cv}" placeholder="類型" value="${esc(row.type)}" onchange="updateShortExit(${i},'type',this.value)" maxlength="50"></div>
+                <div class="col-flex"><input class="input-field ${cv}" placeholder="條件" value="${esc(row.condition)}" onchange="updateShortExit(${i},'condition',this.value)" maxlength="200"></div>
+                <div class="col-flex"><input class="input-field ${cv}" placeholder="動作" value="${esc(row.action)}" onchange="updateShortExit(${i},'action',this.value)" maxlength="200"></div>
+                <div class="col-flex"><input class="input-field ${cv}" placeholder="後續" value="${esc(row.next)}" onchange="updateShortExit(${i},'next',this.value)" maxlength="200"></div>
+                <div class="col-action"><button class="icon-btn remove" onclick="removeShortExit(${i})">✕</button></div>
               </div>
             `).join('')}
+            <div class="add-row"><button class="icon-btn add" onclick="addShortExit()">+ 新增</button></div>
           </div>
         `;
       } else {
@@ -1217,8 +1229,8 @@
     function updateLongEntry(i, field, value) {
       strategy.long.stage1.entry[i][field] = Security.validate(value);
     }
-    function updateLongExit(key, field, value) {
-      strategy.long.stage1.exit[key][field] = Security.validate(value);
+    function updateLongExit(i, field, value) {
+      strategy.long.stage1.exit[i][field] = Security.validate(value);
     }
     function updateLongStage(field, value) {
       strategy.long[`stage${longStage}`][field] = Security.validate(value);
@@ -1226,8 +1238,8 @@
     function updateShortEntry(i, field, value) {
       strategy.short.stage1.entry[i][field] = Security.validate(value);
     }
-    function updateShortExit(key, field, value) {
-      strategy.short.stage1.exit[key][field] = Security.validate(value);
+    function updateShortExit(i, field, value) {
+      strategy.short.stage1.exit[i][field] = Security.validate(value);
     }
     function updateShortStage(field, value) {
       strategy.short[`stage${shortStage}`][field] = Security.validate(value);
@@ -1249,6 +1261,20 @@
         updateStats();
       }
     }
+    function addLongExit() {
+      if (strategy.long.stage1.exit.length >= 20) {
+        notify('最多 20 個平倉條件', 'error');
+        return;
+      }
+      strategy.long.stage1.exit.push(defaultExit());
+      renderLong();
+    }
+    function removeLongExit(i) {
+      if (strategy.long.stage1.exit.length > 1) {
+        strategy.long.stage1.exit.splice(i, 1);
+        renderLong();
+      }
+    }
     function addShortEntry() {
       if (strategy.short.stage1.entry.length >= 20) {
         notify('最多 20 個條件', 'error');
@@ -1263,6 +1289,20 @@
         strategy.short.stage1.entry.splice(i, 1);
         renderShort();
         updateStats();
+      }
+    }
+    function addShortExit() {
+      if (strategy.short.stage1.exit.length >= 20) {
+        notify('最多 20 個平倉條件', 'error');
+        return;
+      }
+      strategy.short.stage1.exit.push(defaultExit());
+      renderShort();
+    }
+    function removeShortExit(i) {
+      if (strategy.short.stage1.exit.length > 1) {
+        strategy.short.stage1.exit.splice(i, 1);
+        renderShort();
       }
     }
 
@@ -1604,9 +1644,8 @@
         r++;
         addRow(ws, r, ['類型', '條件', '動作', '後續'], headerStyle);
         r++;
-        exitTypes.forEach(({ key, label: lbl }) => {
-          const exit = data.stage1.exit[key];
-          addRow(ws, r, [lbl, exit.condition, exit.action, exit.next], cellStyle);
+        data.stage1.exit.forEach((exit) => {
+          addRow(ws, r, [exit.type, exit.condition, exit.action, exit.next], cellStyle);
           r++;
         });
         r++;
