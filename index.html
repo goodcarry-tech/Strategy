@@ -881,17 +881,20 @@
     // ===== 轉換規則 =====
     const CONVERSION_RULES = {
       directions: {
-        '多單': '空單', '空單': '多單',
-        'BUY': 'SELL', 'SELL': 'BUY',
+        '立刻開多單': '立刻開空單', '立刻開空單': '立刻開多單',
+        '立即開多單': '立即開空單', '立即開空單': '立即開多單',
         '開多單': '開空單', '開空單': '開多單',
         '開多': '開空', '開空': '開多',
         '做多': '做空', '做空': '做多',
+        '多單': '空單', '空單': '多單',
         '多頭': '空頭', '空頭': '多頭',
         '看多': '看空', '看空': '看多',
         '買入': '賣出', '賣出': '買入',
+        'BUY': 'SELL', 'SELL': 'BUY',
         'Long': 'Short', 'Short': 'Long',
       },
       candlestick: {
+        'K棒為陰線': 'K棒為陽線', 'K棒為陽線': 'K棒為陰線',
         '陰線': '陽線', '陽線': '陰線',
         '紅K': '黑K', '黑K': '紅K',
         'Close < Open': 'Close > Open',
@@ -997,12 +1000,14 @@
       if (!text || typeof text !== 'string') return text;
       let r = Security.validate(text);
       
+      // 先處理數值比較運算符（< 和 >）
       r = r.replace(/<\s*-\s*(\d+)/g, '__GT__ $1');
       r = r.replace(/>\s*(\d+)(?!\s*points)/g, '__LT__ -$1');
       r = r.replace(/CCI\s*>\s*(\d+)/g, 'CCI __LT__ -$1');
       r = r.replace(/CCI\s*<\s*-\s*(\d+)/g, 'CCI __GT__ $1');
       r = r.replace(/__GT__/g, '>').replace(/__LT__/g, '<');
       
+      // 處理特定價格比較
       r = r.replace(/價格\s*>\s*慢線/g, '價格 __LT__ 慢線');
       r = r.replace(/價格\s*<\s*慢線/g, '價格 __GT__ 慢線');
       r = r.replace(/價格\s*>\s*快線/g, '價格 __LT__ 快線');
@@ -1011,15 +1016,35 @@
       r = r.replace(/Close\s*<\s*SMA/g, 'Close __GT__ SMA');
       r = r.replace(/__GT__/g, '>').replace(/__LT__/g, '<');
       
+      // 處理 Close > Open 和 Close < Open（必須在陰陽線之前處理）
+      r = r.replace(/Close\s*<\s*Open/g, '__CLOSE_LT_OPEN__');
+      r = r.replace(/Close\s*>\s*Open/g, '__CLOSE_GT_OPEN__');
+      
+      // 按照優先順序處理轉換規則
+      // 1. 先處理較長的詞組，避免被短詞組優先匹配
+      const allRules = [];
       for (const cat in CONVERSION_RULES) {
         const rules = CONVERSION_RULES[cat];
         for (const from in rules) {
-          r = r.split(from).join('__T_' + rules[from] + '__');
-        }
-        for (const from in rules) {
-          r = r.split('__T_' + rules[from] + '__').join(rules[from]);
+          allRules.push({ from, to: rules[from], len: from.length });
         }
       }
+      // 按長度降序排序（長的先處理）
+      allRules.sort((a, b) => b.len - a.len);
+      
+      // 2. 執行替換（使用標記避免重複轉換）
+      allRules.forEach(rule => {
+        const regex = new RegExp(rule.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+        r = r.replace(regex, `__T_${rule.to}__`);
+      });
+      
+      // 3. 移除標記
+      r = r.replace(/__T_/g, '').replace(/__/g, '');
+      
+      // 恢復 Close 和 Open 的比較
+      r = r.replace(/__CLOSE_LT_OPEN__/g, 'Close > Open');
+      r = r.replace(/__CLOSE_GT_OPEN__/g, 'Close < Open');
+      
       return r;
     }
 
