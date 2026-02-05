@@ -510,7 +510,7 @@
         <button class="btn btn-ghost" onclick="newStrategy()">✨ 新策略</button>
         <button class="btn btn-ghost" onclick="showLoadModal()">📂 載入</button>
         <button class="btn btn-primary" onclick="showSaveModal()">💾 保存</button>
-        <button class="btn btn-convert" onclick="convertLongToShort()">🔄 轉換</button>
+        <button class="btn btn-convert" onclick="convertStrategy()">🔄 轉換</button>
         <button class="btn btn-success" onclick="exportToExcel()">📥 匯出</button>
         <button class="btn btn-security" onclick="showSecurityModal()">🛡️</button>
       </div>
@@ -546,8 +546,8 @@
     <div class="convert-notice">
       <div class="icon">💡</div>
       <div class="text">
-        <h4>自動多空轉換</h4>
-        <p>填寫多頭策略後，點擊「🔄 轉換」自動生成空頭策略</p>
+        <h4>智能雙向轉換</h4>
+        <p>填寫多頭或空頭策略後，點擊「🔄 轉換」自動生成對應策略</p>
       </div>
       <button class="btn btn-ghost" onclick="showRulesModal()">規則</button>
     </div>
@@ -680,8 +680,8 @@
     <div class="modal-content">
       <h3>💾 保存策略</h3>
       <div class="form-group">
-        <label>策略名稱</label>
-        <input type="text" id="saveStrategyName" class="input-field" placeholder="輸入名稱..." maxlength="100">
+        <label>策略名稱 <span style="color: rgba(255,255,255,0.5); font-size: 11px;">(留空自動命名)</span></label>
+        <input type="text" id="saveStrategyName" class="input-field" placeholder="輸入名稱或留空自動生成..." maxlength="100">
       </div>
       <div class="password-toggle">
         <input type="checkbox" id="usePassword">
@@ -1018,8 +1018,7 @@
       r = r.replace(/Close\s*<\s*Open/gi, '§CLOSELTOPEN§');
       r = r.replace(/Close\s*>\s*Open/gi, '§CLOSEGTOPEN§');
       
-      // 按照優先順序處理轉換規則
-      // 1. 收集所有規則並按長度排序
+      // 按長度排序所有轉換規則（長的優先）
       const allRules = [];
       for (const cat in CONVERSION_RULES) {
         const rules = CONVERSION_RULES[cat];
@@ -1027,23 +1026,33 @@
           allRules.push({ from, to: rules[from], len: from.length });
         }
       }
-      // 按長度降序排序（長的先處理）
       allRules.sort((a, b) => b.len - a.len);
       
-      // 2. 執行替換（使用唯一標記避免重複轉換）
+      // 使用唯一ID標記，避免重複轉換
+      let counter = 0;
+      const replacements = new Map();
+      
       allRules.forEach(rule => {
-        // 跳過 Close < Open 和 Close > Open（已經處理過）
+        // 跳過已單獨處理的 Close < Open 和 Close > Open
         if (rule.from === 'Close < Open' || rule.from === 'Close > Open') {
           return;
         }
+        
         const regex = new RegExp(rule.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-        r = r.replace(regex, `¶${rule.to}¶`);
+        r = r.replace(regex, () => {
+          const id = `¶ID${counter}¶`;
+          replacements.set(id, rule.to);
+          counter++;
+          return id;
+        });
       });
       
-      // 3. 移除標記
-      r = r.replace(/¶/g, '');
+      // 執行所有替換
+      replacements.forEach((value, id) => {
+        r = r.replace(new RegExp(id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
+      });
       
-      // 4. 恢復 Close 和 Open 的比較
+      // 恢復 Close 和 Open 的比較
       r = r.replace(/§CLOSELTOPEN§/g, 'Close > Open');
       r = r.replace(/§CLOSEGTOPEN§/g, 'Close < Open');
       
@@ -1077,6 +1086,64 @@
       renderShort();
       updateStats();
       notify('✅ 空頭策略已生成', 'info');
+    }
+
+    function convertShortToLong() {
+      strategy.long.stage1.entry = strategy.short.stage1.entry.map(row => ({
+        condition: applyConversions(row.condition),
+        param: applyConversions(row.param),
+        note: applyConversions(row.note)
+      }));
+      
+      strategy.long.stage1.exit = strategy.short.stage1.exit.map(row => ({
+        type: applyConversions(row.type),
+        condition: applyConversions(row.condition),
+        action: applyConversions(row.action),
+        next: applyConversions(row.next)
+      }));
+      
+      [2, 3, 4].forEach(n => {
+        stageFields.forEach(({ key }) => {
+          strategy.long[`stage${n}`][key] = applyConversions(strategy.short[`stage${n}`][key]);
+        });
+      });
+      
+      strategy.converted = true;
+      document.getElementById('shortBadge').textContent = '已轉換';
+      document.getElementById('shortBadge').className = 'badge converted';
+      
+      renderLong();
+      updateStats();
+      notify('✅ 多頭策略已生成', 'info');
+    }
+
+    function convertStrategy() {
+      // 智能判斷轉換方向
+      const longHasContent = strategy.long.stage1.entry.some(row => 
+        row.condition || row.param || row.note
+      );
+      const shortHasContent = strategy.short.stage1.entry.some(row => 
+        row.condition || row.param || row.note
+      );
+      
+      if (longHasContent && !shortHasContent) {
+        // 多頭有內容，空頭沒有 → 多轉空
+        convertLongToShort();
+      } else if (shortHasContent && !longHasContent) {
+        // 空頭有內容，多頭沒有 → 空轉多
+        convertShortToLong();
+      } else if (longHasContent && shortHasContent) {
+        // 兩邊都有內容，詢問用戶
+        const choice = confirm('多頭和空頭都有內容。\n\n點擊「確定」將多頭轉換到空頭\n點擊「取消」將空頭轉換到多頭');
+        if (choice) {
+          convertLongToShort();
+        } else {
+          convertShortToLong();
+        }
+      } else {
+        // 兩邊都沒內容
+        notify('請先填寫多頭或空頭策略內容', 'error');
+      }
     }
 
     // ===== UI =====
@@ -1369,10 +1436,13 @@
     }
 
     function saveStrategy() {
-      const name = Security.validate(document.getElementById('saveStrategyName').value.trim(), 100);
+      let name = Security.validate(document.getElementById('saveStrategyName').value.trim(), 100);
+      
+      // 如果沒有輸入名稱，自動生成
       if (!name) {
-        notify('請輸入名稱', 'error');
-        return;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+        const count = savedList.length + 1;
+        name = `策略_${count}_${timestamp}`;
       }
       
       const usePassword = document.getElementById('usePassword').checked;
@@ -1382,6 +1452,8 @@
       document.getElementById('strategyName').value = name;
       
       const storageKey = 'strategy_' + Crypto.hash(name);
+      
+      // 檢查是否已存在同名策略
       const idx = savedList.findIndex(s => s.name === name);
       
       const meta = {
@@ -1392,9 +1464,16 @@
       };
       
       if (idx >= 0) {
+        // 同名策略，詢問是否覆蓋
+        if (!confirm(`已存在名為「${name}」的策略，是否覆蓋？`)) {
+          return;
+        }
         savedList[idx] = meta;
+        notify('✅ 策略已更新', 'success');
       } else {
+        // 新策略，直接添加
         savedList.push(meta);
+        notify('✅ 策略已保存', 'success');
       }
       
       SecureStorage.save(storageKey, strategy, password);
@@ -1491,12 +1570,15 @@
 
     function deleteStrategy(i) {
       const meta = savedList[i];
+      if (!confirm(`確定要刪除策略「${meta.name}」嗎？此操作無法復原。`)) {
+        return;
+      }
       SecureStorage.remove(meta.key);
       savedList.splice(i, 1);
       saveSavedList();
       showLoadModal();
       updateStats();
-      notify('已刪除');
+      notify('✅ 已刪除', 'success');
     }
 
     // Security Modal
@@ -1594,11 +1676,17 @@
 
     // Rules
     function showRulesModal() {
-      let html = '';
+      let html = '<div style="margin-bottom: 16px; padding: 12px; background: rgba(0,212,255,0.1); border-radius: 8px; font-size: 13px; line-height: 1.6;">';
+      html += '<strong style="color: #00d4ff;">✨ 智能雙向轉換</strong><br>';
+      html += '• 填寫多頭 → 自動生成空頭<br>';
+      html += '• 填寫空頭 → 自動生成多頭<br>';
+      html += '• 兩邊都有 → 詢問轉換方向<br>';
+      html += '</div>';
+      
       for (const cat in CONVERSION_RULES) {
         html += `<div class="rule-category"><h5>${RULE_LABELS[cat]}</h5>`;
         for (const [from, to] of Object.entries(CONVERSION_RULES[cat])) {
-          html += `<div class="rule-item"><span class="from">${esc(from)}</span><span class="arrow">→</span><span class="to">${esc(to)}</span></div>`;
+          html += `<div class="rule-item"><span class="from">${esc(from)}</span><span class="arrow">⇄</span><span class="to">${esc(to)}</span></div>`;
         }
         html += '</div>';
       }
